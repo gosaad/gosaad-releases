@@ -1,0 +1,98 @@
+name: gosaad
+
+services:
+  gosaad-core:
+    image: ${GOSAAD_IMAGE:?Set GOSAAD_IMAGE in .env}:${GOSAAD_IMAGE_TAG:?Set GOSAAD_IMAGE_TAG in .env}
+    pull_policy: always
+    env_file:
+      - ./.env
+    depends_on:
+      database:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3G
+    environment:
+      DB_HOST: database
+      DB_PORT: "5432"
+      DB_USER: ${APP_DB_USER:?Set APP_DB_USER in .env}
+      DB_PASSWORD: ${APP_DB_PASSWORD:?Set APP_DB_PASSWORD in .env}
+      DB_NAME: ${APP_DB_NAME:?Set APP_DB_NAME in .env}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env}
+      RUNTIME_DIR: /app/runtime
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --show-error --output /dev/null http://127.0.0.1:8080/api/v1/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - public
+      - database
+    restart: unless-stopped
+    volumes:
+      - api-runtime:/app/runtime
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    depends_on:
+      gosaad-core:
+        condition: service_healthy
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN:?Set CADDY_DOMAIN in .env}
+      CADDY_EMAIL: ${CADDY_EMAIL:?Set CADDY_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    networks:
+      - public
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  database:
+    image: postgres:18.4
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements"]
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3G
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${APP_DB_NAME:?Set APP_DB_NAME in .env}
+      APP_DB_USER: ${APP_DB_USER:?Set APP_DB_USER in .env}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Set APP_DB_PASSWORD in .env}
+      SYSTEM_RESTORE_MAINTENANCE_DB: ${SYSTEM_RESTORE_MAINTENANCE_DB:?Set SYSTEM_RESTORE_MAINTENANCE_DB in .env}
+      SYSTEM_RESTORE_DB_ADMIN_USER: ${SYSTEM_RESTORE_DB_ADMIN_USER:-}
+      SYSTEM_RESTORE_DB_ADMIN_PASSWORD: ${SYSTEM_RESTORE_DB_ADMIN_PASSWORD:-}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    networks:
+      - database
+    restart: unless-stopped
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+
+networks:
+  public:
+  database:
+    internal: true
+
+volumes:
+  api-runtime:
+  caddy-config:
+  caddy-data:
+  postgres-data:
