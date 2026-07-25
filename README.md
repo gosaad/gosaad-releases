@@ -35,4 +35,4 @@ docker compose logs --follow gosaad-core
 docker compose down
 ```
 
-`docker compose up -d` pulls the current GoSAAD image. Do not use `docker compose down -v` unless you want to delete the local database.
+`docker compose up -d` pulls the current GoSAAD and PostgreSQL images. Do not use `docker compose down -v` unless you want to delete the local database.

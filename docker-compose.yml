@@ -40,7 +40,8 @@ services:
       - api-runtime:/app/runtime
 
   database:
-    image: postgres:18.4
+    image: ghcr.io/gosaad/gosaad-postgres:latest
+    pull_policy: always
     command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements"]
     # Optional: constrain PostgreSQL to the stated CPU and memory budget.
     # Adjust or remove this block when the host needs a different allocation.
@@ -69,7 +70,6 @@ services:
     restart: unless-stopped
     volumes:
       - postgres-data:/var/lib/postgresql
-      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
 
 networks:
   database:
