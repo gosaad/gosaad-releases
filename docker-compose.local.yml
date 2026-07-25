@@ -1,4 +1,4 @@
-name: gosaad
+name: gosaad-local
 
 services:
   gosaad-core:
@@ -9,13 +9,6 @@ services:
     depends_on:
       database:
         condition: service_healthy
-    # Optional: constrain the application to the stated CPU and memory budget.
-    # Adjust or remove this block when the host needs a different allocation.
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 3G
     environment:
       DB_HOST: database
       DB_PORT: "5432"
@@ -31,43 +24,17 @@ services:
       timeout: 5s
       retries: 6
       start_period: 30s
+    ports:
+      - "127.0.0.1:8080:8080"
     networks:
-      - public
       - database
     restart: unless-stopped
     volumes:
       - api-runtime:/app/runtime
 
-  caddy:
-    image: caddy:2.10.2-alpine
-    depends_on:
-      gosaad-core:
-        condition: service_healthy
-    environment:
-      CADDY_DOMAIN: ${CADDY_DOMAIN:?Set CADDY_DOMAIN in .env}
-      CADDY_EMAIL: ${CADDY_EMAIL:?Set CADDY_EMAIL in .env}
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    networks:
-      - public
-    restart: unless-stopped
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-
   database:
     image: postgres:18.4
     command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements"]
-    # Optional: constrain PostgreSQL to the stated CPU and memory budget.
-    # Adjust or remove this block when the host needs a different allocation.
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 3G
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
@@ -91,12 +58,9 @@ services:
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
 
 networks:
-  public:
   database:
     internal: true
 
 volumes:
   api-runtime:
-  caddy-config:
-  caddy-data:
   postgres-data:

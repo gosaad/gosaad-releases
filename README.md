@@ -1,4 +1,4 @@
-# GoSAAD production deployment
+# GoSAAD deployment
 
 This repository runs a published GoSAAD container image with PostgreSQL and Caddy. Caddy terminates HTTPS and forwards requests to the application. PostgreSQL and application runtime data use named Docker volumes and are not exposed publicly.
 
@@ -32,9 +32,20 @@ docker compose ps
 
 The application will be available at `https://CADDY_DOMAIN` after Caddy receives its TLS certificate.
 
+## Local deployment
+
+For local use, the dedicated Compose file skips Caddy and publishes the application only on the loopback interface at `http://localhost:8080`:
+
+```sh
+docker compose -f docker-compose.local.yml up -d
+docker compose -f docker-compose.local.yml ps
+```
+
+Use the same `.env` setup as production. The Caddy values in `.env` are ignored in local mode. Do not use this mode for a user-facing deployment.
+
 ## Updating
 
-After a new image has been published with the selected `GOSAAD_IMAGE_TAG`:
+After a new image has been published as `ghcr.io/gosaad/gosaad:latest`:
 
 ```sh
 git pull --ff-only
