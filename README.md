@@ -2,6 +2,14 @@
 
 Run GoSAAD and PostgreSQL locally at `http://localhost:8080`.
 
+For an interactive setup on supported Linux, macOS, or WSL with Docker Desktop integration:
+
+```sh
+bash autosetup.sh
+```
+
+The script installs Docker where supported, prepares the release files, can securely generate `.env`, and can start the deployment. Re-run it after an interrupted step; it checks completed prerequisites before continuing. Native Windows Bash environments are not supported.
+
 ```sh
 git clone https://github.com/gosaad/gosaad-releases.git
 cd gosaad-releases
