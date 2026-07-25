@@ -31,32 +31,13 @@ services:
       timeout: 5s
       retries: 6
       start_period: 30s
+    ports:
+      - "127.0.0.1:8080:8080"
     networks:
-      - public
       - database
     restart: unless-stopped
     volumes:
       - api-runtime:/app/runtime
-
-  caddy:
-    image: caddy:2.10.2-alpine
-    depends_on:
-      gosaad-core:
-        condition: service_healthy
-    environment:
-      CADDY_DOMAIN: ${CADDY_DOMAIN:?Set CADDY_DOMAIN in .env}
-      CADDY_EMAIL: ${CADDY_EMAIL:?Set CADDY_EMAIL in .env}
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    networks:
-      - public
-    restart: unless-stopped
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
 
   database:
     image: postgres:18.4
@@ -91,12 +72,9 @@ services:
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
 
 networks:
-  public:
   database:
     internal: true
 
 volumes:
   api-runtime:
-  caddy-config:
-  caddy-data:
   postgres-data:
