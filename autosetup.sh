@@ -18,6 +18,73 @@ log() {
   printf '%s\n' "$*"
 }
 
+supports_color() {
+  [[ -t 1 && "${TERM:-}" != "dumb" ]]
+}
+
+write_banner() {
+  printf '\n'
+  if supports_color; then
+    printf '\033[30;46m GoSAAD Setup \033[0m\n'
+    printf '\033[90m Local CBT deployment with Docker\033[0m\n'
+    return
+  fi
+
+  printf 'GoSAAD Setup\n'
+  printf 'Local CBT deployment with Docker\n'
+}
+
+write_step() {
+  local number="$1"
+  local total="$2"
+  local title="$3"
+
+  printf '\n'
+  if supports_color; then
+    printf '\033[33m[%s/%s]\033[0m \033[1m%s\033[0m\n' "$number" "$total" "$title"
+    return
+  fi
+
+  printf '[%s/%s] %s\n' "$number" "$total" "$title"
+}
+
+write_command() {
+  local argument=""
+
+  if supports_color; then
+    printf '\033[90m      >\033[0m'
+  else
+    printf '      >'
+  fi
+
+  for argument in "$@"; do
+    printf ' %q' "$argument"
+  done
+  printf '\n'
+}
+
+write_success() {
+  local message="$1"
+
+  if supports_color; then
+    printf '      \033[32m[OK]\033[0m %s\n' "$message"
+    return
+  fi
+
+  printf '      [OK] %s\n' "$message"
+}
+
+write_info() {
+  local message="$1"
+
+  if supports_color; then
+    printf '      \033[90m...\033[0m %s\n' "$message"
+    return
+  fi
+
+  printf '      ... %s\n' "$message"
+}
+
 die() {
   printf 'ERROR: %s\n' "$*" >&2
   exit 1
@@ -37,11 +104,13 @@ command_exists() {
 
 run_privileged() {
   if [[ "$(id -u)" -eq 0 ]]; then
+    write_command "$@"
     "$@"
     return
   fi
 
   command_exists sudo || die "sudo is required to install and configure Docker."
+  write_command sudo "$@"
   sudo "$@"
 }
 
@@ -242,13 +311,16 @@ ensure_docker_access() {
 
 install_macos_docker() {
   command_exists brew || die "Docker Desktop must be installed through Homebrew on macOS. Install Homebrew and rerun this installer."
+  write_command brew install --cask docker
   brew install --cask docker
+  write_command open -a Docker
   open -a Docker || die "Docker Desktop was installed but could not be started. Start Docker Desktop manually, then rerun this installer."
   die "Docker Desktop is starting. Wait until it reports that Docker is running, then rerun this installer."
 }
 
 ensure_docker() {
   if command_exists docker; then
+    write_command docker info
     case "$PLATFORM" in
       wsl)
         docker info >/dev/null 2>&1 || die "Docker Desktop integration is unavailable in WSL. Start Docker Desktop, enable this WSL distribution in its settings, and rerun this installer."
@@ -258,6 +330,7 @@ ensure_docker() {
         if docker info >/dev/null 2>&1; then
           return
         fi
+        write_command open -a Docker
         open -a Docker || die "Docker is installed but Docker Desktop could not be started. Start it manually, then rerun this installer."
         die "Docker Desktop is starting. Wait until it is running, then rerun this installer."
         ;;
@@ -311,6 +384,7 @@ install_linux_compose_plugin() {
 }
 
 ensure_compose() {
+  write_command docker compose version
   if docker compose version >/dev/null 2>&1; then
     return
   fi
@@ -321,7 +395,9 @@ ensure_compose() {
       ;;
     macos)
       command_exists brew || die "Docker Compose is unavailable. Update or reinstall Docker Desktop, start it, and rerun this installer."
+      write_command brew reinstall --cask docker
       brew reinstall --cask docker
+      write_command open -a Docker
       open -a Docker || die "Docker Desktop was reinstalled but could not be started. Start it manually, then rerun this installer."
       die "Docker Desktop was reinstalled and is starting. Wait until it is running, then rerun this installer."
       ;;
@@ -353,11 +429,13 @@ download_file() {
 
   temporary_file="$(mktemp "$DEPLOY_DIR/.download.XXXXXX")"
   if command_exists curl; then
+    write_command curl --fail --location --silent --show-error "$url" --output "$temporary_file"
     if ! curl --fail --location --silent --show-error "$url" --output "$temporary_file"; then
       rm -f "$temporary_file"
       die "Failed to download $url."
     fi
   elif command_exists wget; then
+    write_command wget --quiet --output-document="$temporary_file" "$url"
     if ! wget --quiet --output-document="$temporary_file" "$url"; then
       rm -f "$temporary_file"
       die "Failed to download $url."
@@ -368,15 +446,18 @@ download_file() {
   fi
 
   mv "$temporary_file" "$destination"
+  write_success "Downloaded $(basename "$destination")."
 }
 
 ensure_deployment_files() {
   if [[ -d "$DEPLOY_DIR" ]]; then
     [[ -f "$DEPLOY_DIR/docker-compose.yml" && -f "$ENV_TEMPLATE" ]] || die "Deployment directory exists but is missing docker-compose.yml or .env.example: $DEPLOY_DIR"
+    write_info "Using existing release files in $DEPLOY_DIR."
     return
   fi
 
   if command_exists git; then
+    write_command git clone "$REPOSITORY_URL" "$DEPLOY_DIR"
     git clone "$REPOSITORY_URL" "$DEPLOY_DIR"
   else
     mkdir -p "$DEPLOY_DIR"
@@ -385,6 +466,7 @@ ensure_deployment_files() {
   fi
 
   [[ -f "$DEPLOY_DIR/docker-compose.yml" && -f "$ENV_TEMPLATE" ]] || die "Release files were not created successfully in $DEPLOY_DIR."
+  write_success "Release files are ready in $DEPLOY_DIR."
 }
 
 generate_secret() {
@@ -493,10 +575,12 @@ generate_env() {
   local timestamp=""
 
   if [[ -f "$ENV_FILE" ]] && ! ask_yes_no "A .env file already exists. Override it?"; then
-    log "Keeping the existing .env file."
+    write_success "Keeping the existing .env file: $ENV_FILE"
     return
   fi
 
+  write_command openssl rand -hex 32
+  write_info "Running this command four times; generated secret values stay hidden."
   app_version="$(resolve_app_version)"
   postgres_password="$(generate_secret)"
   app_db_password="$(generate_secret)"
@@ -516,21 +600,63 @@ generate_env() {
 
   mv "$TEMP_ENV_FILE" "$ENV_FILE"
   TEMP_ENV_FILE=""
-  log "Generated $ENV_FILE while preserving APP_VERSION=$app_version."
+  write_success "Generated $ENV_FILE while preserving APP_VERSION=$app_version."
 }
 
 start_deployment() {
   [[ -f "$ENV_FILE" ]] || die "Cannot start GoSAAD because .env is missing. Generate it, then rerun this installer."
   (
     cd "$DEPLOY_DIR"
+    write_info "Downloading container images can take several minutes on the first installation."
+    write_command docker compose pull
+    docker compose pull
+    write_success "Container images are available."
+
+    write_command docker compose up -d
     docker compose up -d
-    docker compose ps
+    write_success "GoSAAD containers were started."
   )
+}
+
+show_deployment_status() {
+  (
+    cd "$DEPLOY_DIR"
+    write_command docker compose ps
+    docker compose ps
+    write_success "Deployment status was retrieved."
+  )
+}
+
+write_completion() {
+  printf '\n'
+  if supports_color; then
+    printf '\033[32mSetup commands completed.\033[0m\n'
+    printf 'Open GoSAAD: \033[36mhttp://localhost:8080\033[0m\n'
+    printf '\033[90mIf a container is still starting, run '\''docker compose ps'\'' again from %s.\033[0m\n' "$DEPLOY_DIR"
+    return
+  fi
+
+  printf 'Setup commands completed.\n'
+  printf 'Open GoSAAD: http://localhost:8080\n'
+  printf 'If a container is still starting, run '\''docker compose ps'\'' again from %s.\n' "$DEPLOY_DIR"
+}
+
+write_environment_completion() {
+  printf '\n'
+  if supports_color; then
+    printf '\033[32mEnvironment configuration completed.\033[0m\n'
+    printf '\033[90mAPP_VERSION was preserved and no containers were started.\033[0m\n'
+    return
+  fi
+
+  printf 'Environment configuration completed.\n'
+  printf 'APP_VERSION was preserved and no containers were started.\n'
 }
 
 main() {
   local automatic=0
   local env_only=0
+  local total_steps=7
 
   case "$#" in
     0)
@@ -557,22 +683,46 @@ main() {
       ;;
   esac
 
+  if [[ "$env_only" -eq 1 ]]; then
+    total_steps=3
+  fi
+
+  write_banner
+  write_step 1 "$total_steps" "Detecting platform and deployment location"
   detect_platform
   resolve_deploy_directory
+  write_success "Platform=$PLATFORM deployment=$DEPLOY_DIR"
 
   if [[ "$env_only" -eq 1 ]]; then
+    write_step 2 "$total_steps" "Preparing release files"
     ensure_deployment_files
+    write_step 3 "$total_steps" "Preparing environment configuration"
     generate_env
+    write_environment_completion
     return
   fi
 
+  write_step 2 "$total_steps" "Checking Docker"
   ensure_docker
+  write_success "Docker engine is running."
+
+  write_step 3 "$total_steps" "Checking Docker Compose"
   ensure_compose
+  write_success "Docker Compose is available."
+
+  write_step 4 "$total_steps" "Preparing release files"
   ensure_deployment_files
 
+  write_step 5 "$total_steps" "Preparing environment configuration"
   if [[ "$automatic" -eq 1 ]]; then
     generate_env
+
+    write_step 6 "$total_steps" "Downloading images and starting GoSAAD"
     start_deployment
+
+    write_step 7 "$total_steps" "Showing deployment status"
+    show_deployment_status
+    write_completion
     return
   fi
 
@@ -581,9 +731,14 @@ main() {
   fi
 
   if ask_yes_no "Do you want to start GoSAAD now?"; then
+    write_step 6 "$total_steps" "Downloading images and starting GoSAAD"
     start_deployment
+
+    write_step 7 "$total_steps" "Showing deployment status"
+    show_deployment_status
+    write_completion
   else
-    log "Run this later from $DEPLOY_DIR: docker compose up -d"
+    write_info "Run this later from $DEPLOY_DIR: docker compose pull && docker compose up -d"
   fi
 }
 
