@@ -33,6 +33,7 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     networks:
+      - frontend
       - database
     restart: unless-stopped
     volumes:
@@ -70,6 +71,7 @@ services:
       - postgres-data:/var/lib/postgresql
 
 networks:
+  frontend:
   database:
     internal: true
 
