@@ -2,8 +2,7 @@ name: gosaad
 
 services:
   gosaad-core:
-    image: ghcr.io/gosaad/gosaad:latest
-    pull_policy: always
+    image: ghcr.io/gosaad/gosaad:${APP_VERSION:?Set APP_VERSION in .env}
     env_file:
       - ./.env
     depends_on:
@@ -40,8 +39,7 @@ services:
       - api-runtime:/app/runtime
 
   database:
-    image: ghcr.io/gosaad/gosaad-postgres:latest
-    pull_policy: always
+    image: ghcr.io/gosaad/gosaad-postgres:${APP_VERSION:?Set APP_VERSION in .env}
     command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements"]
     # Optional: constrain PostgreSQL to the stated CPU and memory budget.
     # Adjust or remove this block when the host needs a different allocation.

@@ -50,7 +50,14 @@ ask_yes_no() {
   local answer=""
 
   while true; do
-    read -r -p "$prompt [y/N]: " answer
+    if [[ -t 0 ]]; then
+      read -r -p "$prompt [y/N]: " answer
+    elif [[ -r /dev/tty ]]; then
+      read -r -p "$prompt [y/N]: " answer < /dev/tty
+    else
+      die "Interactive input is required for this decision, but no terminal is available: $prompt"
+    fi
+
     case "$answer" in
       y|Y|yes|Yes|YES)
         return 0
@@ -63,6 +70,25 @@ ask_yes_no() {
         ;;
     esac
   done
+}
+
+print_help() {
+  cat <<'EOF'
+Usage: bash autosetup.sh [OPTION]
+
+Install Docker and Docker Compose when needed, generate .env, and optionally
+start the local GoSAAD deployment.
+
+Options:
+  -h, --help  Show this help message and exit.
+  --automatic Generate .env without prompting when it does not exist, ask before
+              replacing an existing .env, and then start the deployment.
+  --env-only  Generate or replace .env without checking Docker or starting
+              the deployment.
+
+APP_VERSION is copied from the existing .env when it exists, or from
+.env.example on first installation. This installer never changes it.
+EOF
 }
 
 detect_platform() {
@@ -370,12 +396,43 @@ generate_secret() {
   printf '%s' "$secret"
 }
 
+read_app_version() {
+  local source_file="$1"
+  local line=""
+  local app_version=""
+  local matches=0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      APP_VERSION=*)
+        app_version="${line#APP_VERSION=}"
+        matches=$((matches + 1))
+        ;;
+    esac
+  done < "$source_file"
+
+  [[ "$matches" -eq 1 ]] || die "Expected exactly one APP_VERSION entry in $source_file, found $matches."
+  [[ "$app_version" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "APP_VERSION in $source_file is empty or invalid: $app_version"
+  printf '%s' "$app_version"
+}
+
+resolve_app_version() {
+  if [[ -f "$ENV_FILE" ]]; then
+    read_app_version "$ENV_FILE"
+    return
+  fi
+
+  read_app_version "$ENV_TEMPLATE"
+}
+
 write_generated_env() {
   local postgres_password="$1"
   local app_db_password="$2"
   local jwt_secret="$3"
   local jwt_refresh_secret="$4"
+  local app_version="$5"
   local line=""
+  local app_version_found=0
   local postgres_found=0
   local app_db_found=0
   local jwt_found=0
@@ -383,6 +440,10 @@ write_generated_env() {
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
+      APP_VERSION=*)
+        printf 'APP_VERSION=%s\n' "$app_version" >> "$TEMP_ENV_FILE"
+        app_version_found=1
+        ;;
       POSTGRES_PASSWORD=*)
         printf 'POSTGRES_PASSWORD=%s\n' "$postgres_password" >> "$TEMP_ENV_FILE"
         postgres_found=1
@@ -405,6 +466,7 @@ write_generated_env() {
     esac
   done < "$ENV_TEMPLATE"
 
+  [[ "$app_version_found" -eq 1 ]] || die ".env.example is missing APP_VERSION."
   [[ "$postgres_found" -eq 1 ]] || die ".env.example is missing POSTGRES_PASSWORD."
   [[ "$app_db_found" -eq 1 ]] || die ".env.example is missing APP_DB_PASSWORD."
   [[ "$jwt_found" -eq 1 ]] || die ".env.example is missing JWT_SECRET."
@@ -422,6 +484,7 @@ backup_timestamp() {
 }
 
 generate_env() {
+  local app_version=""
   local postgres_password=""
   local app_db_password=""
   local jwt_secret=""
@@ -434,6 +497,7 @@ generate_env() {
     return
   fi
 
+  app_version="$(resolve_app_version)"
   postgres_password="$(generate_secret)"
   app_db_password="$(generate_secret)"
   jwt_secret="$(generate_secret)"
@@ -441,7 +505,7 @@ generate_env() {
 
   umask 077
   TEMP_ENV_FILE="$(mktemp "$DEPLOY_DIR/.env.generated.XXXXXX")"
-  write_generated_env "$postgres_password" "$app_db_password" "$jwt_secret" "$jwt_refresh_secret"
+  write_generated_env "$postgres_password" "$app_db_password" "$jwt_secret" "$jwt_refresh_secret" "$app_version"
 
   if [[ -f "$ENV_FILE" ]]; then
     timestamp="$(backup_timestamp)"
@@ -452,7 +516,7 @@ generate_env() {
 
   mv "$TEMP_ENV_FILE" "$ENV_FILE"
   TEMP_ENV_FILE=""
-  log "Generated $ENV_FILE."
+  log "Generated $ENV_FILE while preserving APP_VERSION=$app_version."
 }
 
 start_deployment() {
@@ -465,11 +529,52 @@ start_deployment() {
 }
 
 main() {
+  local automatic=0
+  local env_only=0
+
+  case "$#" in
+    0)
+      ;;
+    1)
+      case "$1" in
+        -h|--help)
+          print_help
+          return
+          ;;
+        --automatic)
+          automatic=1
+          ;;
+        --env-only)
+          env_only=1
+          ;;
+        *)
+          die "Unsupported option: $1. Run 'bash autosetup.sh --help' for usage."
+          ;;
+      esac
+      ;;
+    *)
+      die "Expected at most one option. Run 'bash autosetup.sh --help' for usage."
+      ;;
+  esac
+
   detect_platform
   resolve_deploy_directory
+
+  if [[ "$env_only" -eq 1 ]]; then
+    ensure_deployment_files
+    generate_env
+    return
+  fi
+
   ensure_docker
   ensure_compose
   ensure_deployment_files
+
+  if [[ "$automatic" -eq 1 ]]; then
+    generate_env
+    start_deployment
+    return
+  fi
 
   if ask_yes_no "Do you want to generate the .env file now?"; then
     generate_env
