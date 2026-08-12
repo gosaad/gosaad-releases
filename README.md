@@ -73,7 +73,7 @@ Buka file `.env` dengan editor teks. Isi empat nilai berikut dengan nilai acak y
 
 | Variabel | Wajib | Keterangan |
 | --- | --- | --- |
-| `APP_VERSION` | Ya | Versi image GoSAAD yang digunakan. Skrip instalasi tidak pernah mengubah nilai ini secara otomatis. |
+| `APP_VERSION` | Ya | Versi image GoSAAD yang digunakan. Setup interaktif dapat memilih dan memperbaruinya tanpa mengganti nilai rahasia yang sudah ada. |
 | `POSTGRES_PASSWORD` | Ya | Kata sandi administrator PostgreSQL. |
 | `APP_DB_PASSWORD` | Ya | Kata sandi akun database aplikasi. |
 | `JWT_SECRET` | Ya | Rahasia untuk token akses aplikasi. |
@@ -105,7 +105,7 @@ JWT_SECRET=<nilai-acak-ketiga>
 JWT_REFRESH_SECRET=<nilai-acak-keempat>
 ```
 
-Ubah `APP_VERSION` secara manual hanya ketika Anda memang ingin memperbarui versi aplikasi. Biarkan konfigurasi `SYSTEM_RESTORE_*` seperti semula kecuali fitur pemulihan basis data memang akan digunakan. File `.env` sudah diabaikan oleh Git; jangan membagikan isinya atau memasukkannya ke repository.
+Saat setup interaktif dijalankan lagi, skrip menampilkan versi yang dikonfigurasi dan versi container yang terpasang bila tersedia. Pilih versi baru saat diminta untuk memperbarui hanya `APP_VERSION`; kata sandi dan rahasia yang sudah ada tetap dipertahankan. Biarkan konfigurasi `SYSTEM_RESTORE_*` seperti semula kecuali fitur pemulihan basis data memang akan digunakan. File `.env` sudah diabaikan oleh Git; jangan membagikannya atau memasukkannya ke repository.
 
 ### 3. Jalankan layanan
 
@@ -136,7 +136,7 @@ Tekan <kbd>Ctrl</kbd> + <kbd>C</kbd> untuk berhenti melihat log; layanan tetap b
 
 ### Memperbarui GoSAAD
 
-Edit `APP_VERSION` di `.env` secara manual ke versi tujuan, lalu jalankan dari folder repository:
+Jalankan `bash autosetup.sh` dan pilih versi tujuan saat diminta, atau edit `APP_VERSION` di `.env` secara manual. Kemudian jalankan dari folder repository:
 
 ```sh
 git pull --ff-only
@@ -145,7 +145,7 @@ docker compose up -d
 docker compose ps
 ```
 
-`docker compose pull` mengunduh image yang tepat sesuai `APP_VERSION`, sedangkan `docker compose up -d` menerapkan perubahan tanpa perlu menjalankan container di terminal. Skrip instalasi tidak mengubah `APP_VERSION`.
+`docker compose pull` mengunduh image yang tepat sesuai `APP_VERSION`, sedangkan `docker compose up -d` menerapkan perubahan tanpa perlu menjalankan container di terminal. Saat PostgreSQL dimulai, image memastikan `pg_stat_statements` tersedia pada volume yang sudah ada dan database hanya dinyatakan sehat setelah ekstensi dapat dibaca. Sebelum menjalankan container, setup memverifikasi bahwa kedua image tersedia untuk arsitektur Docker saat ini.
 
 ## Data dan penghapusan
 

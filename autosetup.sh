@@ -5,6 +5,8 @@ IFS=$'\n\t'
 
 readonly REPOSITORY_URL="https://github.com/gosaad/gosaad-releases.git"
 readonly RAW_BASE_URL="https://raw.githubusercontent.com/gosaad/gosaad-releases/main"
+readonly APP_IMAGE_REPOSITORY="ghcr.io/gosaad/gosaad"
+readonly POSTGRES_IMAGE_REPOSITORY="ghcr.io/gosaad/gosaad-postgres"
 
 SCRIPT_DIR=""
 DEPLOY_DIR=""
@@ -85,6 +87,10 @@ write_info() {
   printf '      ... %s\n' "$message"
 }
 
+write_warning() {
+  printf 'WARNING: %s\n' "$*" >&2
+}
+
 die() {
   printf 'ERROR: %s\n' "$*" >&2
   exit 1
@@ -155,8 +161,9 @@ Options:
   --env-only  Generate or replace .env without checking Docker or starting
               the deployment.
 
-APP_VERSION is copied from the existing .env when it exists, or from
-.env.example on first installation. This installer never changes it.
+For a new installation, the interactive flow asks which GoSAAD release version
+to use. When a .env already exists, it shows the configured and installed
+versions, then can update only APP_VERSION while preserving existing secrets.
 EOF
 }
 
@@ -494,8 +501,14 @@ read_app_version() {
   done < "$source_file"
 
   [[ "$matches" -eq 1 ]] || die "Expected exactly one APP_VERSION entry in $source_file, found $matches."
-  [[ "$app_version" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "APP_VERSION in $source_file is empty or invalid: $app_version"
+  validate_app_version "$app_version"
   printf '%s' "$app_version"
+}
+
+validate_app_version() {
+  local app_version="$1"
+
+  [[ "$app_version" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "APP_VERSION is empty or invalid: $app_version"
 }
 
 resolve_app_version() {
@@ -505,6 +518,175 @@ resolve_app_version() {
   fi
 
   read_app_version "$ENV_TEMPLATE"
+}
+
+read_installed_app_version() {
+  local container_ids=""
+  local container_id=""
+  local image_reference=""
+  local app_version=""
+  local container_count=0
+
+  if ! container_ids="$(docker ps --all --filter label=com.docker.compose.project=gosaad --filter label=com.docker.compose.service=gosaad-core --format '{{.ID}}' 2>&1)"; then
+    die "Unable to inspect the installed GoSAAD container. Docker output: $container_ids"
+  fi
+
+  if [[ -z "$container_ids" ]]; then
+    return 1
+  fi
+
+  while IFS= read -r container_id; do
+    [[ -n "$container_id" ]] || continue
+    container_count=$((container_count + 1))
+  done <<<"$container_ids"
+  [[ "$container_count" -eq 1 ]] || die "Expected at most one GoSAAD application container, found $container_count. Resolve duplicate containers before running setup."
+
+  container_id="$container_ids"
+  if ! image_reference="$(docker inspect --format '{{.Config.Image}}' "$container_id" 2>&1)"; then
+    die "Unable to inspect GoSAAD container $container_id. Docker output: $image_reference"
+  fi
+
+  case "$image_reference" in
+    "$APP_IMAGE_REPOSITORY":*)
+      app_version="${image_reference#"$APP_IMAGE_REPOSITORY:"}"
+      ;;
+    *)
+      die "GoSAAD container $container_id uses unexpected image $image_reference. Expected $APP_IMAGE_REPOSITORY:<version>."
+      ;;
+  esac
+
+  validate_app_version "$app_version"
+  printf '%s' "$app_version"
+}
+
+show_current_versions() {
+  local configured_version=""
+  local installed_version=""
+
+  if [[ -f "$ENV_FILE" ]]; then
+    configured_version="$(read_app_version "$ENV_FILE")"
+    write_info "Configured GoSAAD version: $configured_version"
+  fi
+
+  if installed_version="$(read_installed_app_version)"; then
+    write_info "Installed GoSAAD version: $installed_version"
+  else
+    write_info "No installed GoSAAD application container was found."
+  fi
+}
+
+inspect_image_platforms() {
+  local image_reference="$1"
+  local platforms=""
+  local attempt=0
+
+  for attempt in 1 2 3; do
+    if platforms="$(docker buildx imagetools inspect --format '{{if .Image.Architecture}}{{.Image.OS}}/{{.Image.Architecture}}{{else}}{{range .Manifest.Manifests}}{{.Platform.OS}}/{{.Platform.Architecture}}{{"\n"}}{{end}}{{end}}' "$image_reference" 2>&1)"; then
+      printf '%s' "$platforms"
+      return
+    fi
+
+    if [[ "$attempt" -lt 3 ]]; then
+      write_warning "Unable to inspect image=$image_reference (attempt $attempt of 3). Retrying in one second. Docker output: $platforms"
+      sleep 1
+    fi
+  done
+
+  die "Unable to inspect image=$image_reference after 3 attempts. Docker output: $platforms"
+}
+
+resolve_docker_architecture() {
+  local docker_architecture=""
+
+  if ! docker_architecture="$(docker info --format '{{.Architecture}}' 2>&1)"; then
+    die "Unable to determine Docker host architecture. Docker output: $docker_architecture"
+  fi
+
+  case "$docker_architecture" in
+    amd64|x86_64)
+      printf '%s' "amd64"
+      ;;
+    arm64|aarch64)
+      printf '%s' "arm64"
+      ;;
+    *)
+      die "Unsupported Docker host architecture: $docker_architecture. Only amd64 and arm64 are supported."
+      ;;
+  esac
+}
+
+verify_image_platform() {
+  local image_reference="$1"
+  local architecture="$2"
+  local image_platforms=""
+
+  image_platforms="$(inspect_image_platforms "$image_reference")"
+  if ! grep -Fxq "linux/$architecture" <<<"$image_platforms"; then
+    die "Image $image_reference does not publish a native linux/$architecture variant. Choose a version that supports your Docker host platform."
+  fi
+}
+
+verify_release_images() {
+  local app_version="$1"
+  local architecture=""
+
+  architecture="$(resolve_docker_architecture)"
+  verify_image_platform "$APP_IMAGE_REPOSITORY:$app_version" "$architecture"
+  verify_image_platform "$POSTGRES_IMAGE_REPOSITORY:$app_version" "$architecture"
+}
+
+select_app_version() {
+  local suggested_version="$1"
+  local selected_version=""
+
+  while true; do
+    if [[ -t 0 ]]; then
+      read -r -p "Select GoSAAD release version [$suggested_version]: " selected_version
+    elif [[ -r /dev/tty ]]; then
+      read -r -p "Select GoSAAD release version [$suggested_version]: " selected_version < /dev/tty
+    else
+      die "Interactive input is required to select a GoSAAD release version, but no terminal is available. Use --automatic to keep the default version."
+    fi
+
+    if [[ -z "$selected_version" ]]; then
+      selected_version="$suggested_version"
+    fi
+
+    if [[ "$selected_version" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+      printf '%s' "$selected_version"
+      return
+    fi
+
+    log "Enter a valid image tag using letters, numbers, dots, underscores, or hyphens."
+  done
+}
+
+update_app_version() {
+  local app_version="$1"
+  local line=""
+  local app_version_found=0
+
+  [[ -f "$ENV_FILE" ]] || die "Cannot update APP_VERSION because .env does not exist: $ENV_FILE"
+  validate_app_version "$app_version"
+
+  umask 077
+  TEMP_ENV_FILE="$(mktemp "$DEPLOY_DIR/.env.version.XXXXXX")"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      APP_VERSION=*)
+        printf 'APP_VERSION=%s\n' "$app_version" >> "$TEMP_ENV_FILE"
+        app_version_found=$((app_version_found + 1))
+        ;;
+      *)
+        printf '%s\n' "$line" >> "$TEMP_ENV_FILE"
+        ;;
+    esac
+  done < "$ENV_FILE"
+
+  [[ "$app_version_found" -eq 1 ]] || die "Expected exactly one APP_VERSION entry in $ENV_FILE, found $app_version_found."
+  mv "$TEMP_ENV_FILE" "$ENV_FILE"
+  TEMP_ENV_FILE=""
+  write_success "Updated APP_VERSION=$app_version while preserving existing secrets."
 }
 
 write_generated_env() {
@@ -566,7 +748,7 @@ backup_timestamp() {
 }
 
 generate_env() {
-  local app_version=""
+  local app_version="$1"
   local postgres_password=""
   local app_db_password=""
   local jwt_secret=""
@@ -581,7 +763,7 @@ generate_env() {
 
   write_command openssl rand -hex 32
   write_info "Running this command four times; generated secret values stay hidden."
-  app_version="$(resolve_app_version)"
+  validate_app_version "$app_version"
   postgres_password="$(generate_secret)"
   app_db_password="$(generate_secret)"
   jwt_secret="$(generate_secret)"
@@ -600,11 +782,15 @@ generate_env() {
 
   mv "$TEMP_ENV_FILE" "$ENV_FILE"
   TEMP_ENV_FILE=""
-  write_success "Generated $ENV_FILE while preserving APP_VERSION=$app_version."
+  write_success "Generated $ENV_FILE with APP_VERSION=$app_version."
 }
 
 start_deployment() {
+  local app_version=""
+
   [[ -f "$ENV_FILE" ]] || die "Cannot start GoSAAD because .env is missing. Generate it, then rerun this installer."
+  app_version="$(read_app_version "$ENV_FILE")"
+  verify_release_images "$app_version"
   (
     cd "$DEPLOY_DIR"
     write_info "Downloading container images can take several minutes on the first installation."
@@ -645,18 +831,20 @@ write_environment_completion() {
   printf '\n'
   if supports_color; then
     printf '\033[32mEnvironment configuration completed.\033[0m\n'
-    printf '\033[90mAPP_VERSION was preserved and no containers were started.\033[0m\n'
+    printf '\033[90mAPP_VERSION was selected and no containers were started.\033[0m\n'
     return
   fi
 
   printf 'Environment configuration completed.\n'
-  printf 'APP_VERSION was preserved and no containers were started.\n'
+  printf 'APP_VERSION was selected and no containers were started.\n'
 }
 
 main() {
   local automatic=0
   local env_only=0
   local total_steps=7
+  local app_version=""
+  local selected_app_version=""
 
   case "$#" in
     0)
@@ -697,7 +885,11 @@ main() {
     write_step 2 "$total_steps" "Preparing release files"
     ensure_deployment_files
     write_step 3 "$total_steps" "Preparing environment configuration"
-    generate_env
+    app_version="$(resolve_app_version)"
+    if [[ ! -f "$ENV_FILE" ]]; then
+      app_version="$(select_app_version "$app_version")"
+    fi
+    generate_env "$app_version"
     write_environment_completion
     return
   fi
@@ -712,10 +904,12 @@ main() {
 
   write_step 4 "$total_steps" "Preparing release files"
   ensure_deployment_files
+  show_current_versions
 
   write_step 5 "$total_steps" "Preparing environment configuration"
   if [[ "$automatic" -eq 1 ]]; then
-    generate_env
+    app_version="$(resolve_app_version)"
+    generate_env "$app_version"
 
     write_step 6 "$total_steps" "Downloading images and starting GoSAAD"
     start_deployment
@@ -726,8 +920,25 @@ main() {
     return
   fi
 
+  if [[ -f "$ENV_FILE" ]] && ask_yes_no "Do you want to select a different GoSAAD release version?"; then
+    app_version="$(read_app_version "$ENV_FILE")"
+    selected_app_version="$(select_app_version "$app_version")"
+    if [[ "$selected_app_version" == "$app_version" ]]; then
+      write_info "Keeping APP_VERSION=$app_version."
+    else
+      verify_release_images "$selected_app_version"
+      update_app_version "$selected_app_version"
+    fi
+  fi
+
   if ask_yes_no "Do you want to generate the .env file now?"; then
-    generate_env
+    app_version="$(resolve_app_version)"
+    if [[ ! -f "$ENV_FILE" ]]; then
+      selected_app_version="$(select_app_version "$app_version")"
+      verify_release_images "$selected_app_version"
+      app_version="$selected_app_version"
+    fi
+    generate_env "$app_version"
   fi
 
   if ask_yes_no "Do you want to start GoSAAD now?"; then
