@@ -1,5 +1,11 @@
 # GoSAAD — Deployment Lokal dengan Docker
 
+> [!IMPORTANT]
+> This README, `autosetup.sh`, `docker-compose.yml`, and `.env.example` are
+> maintained in [`gosaad/release-assets`](https://github.com/gosaad/gosaad/tree/develop/release-assets).
+> Each published GoSAAD release synchronizes them to `gosaad-releases`; edit
+> the canonical files here instead of editing their generated copies.
+
 Repository ini menjalankan **GoSAAD** dan **PostgreSQL** secara lokal memakai Docker Compose. Setelah layanan siap, buka [http://localhost:8080](http://localhost:8080).
 
 > [!IMPORTANT]
@@ -69,7 +75,7 @@ cp .env.example .env
 
 ### 2. Isi nilai rahasia di `.env`
 
-Buka file `.env` dengan editor teks. Isi empat nilai berikut dengan nilai acak yang **berbeda satu sama lain**:
+Buka file `.env` dengan editor teks. Pastikan `APP_VERSION` menunjuk rilis yang ingin digunakan, lalu isi lima nilai rahasia berikut dengan nilai acak yang **berbeda satu sama lain**:
 
 | Variabel | Wajib | Keterangan |
 | --- | --- | --- |
@@ -78,14 +84,15 @@ Buka file `.env` dengan editor teks. Isi empat nilai berikut dengan nilai acak y
 | `APP_DB_PASSWORD` | Ya | Kata sandi akun database aplikasi. |
 | `JWT_SECRET` | Ya | Rahasia untuk token akses aplikasi. |
 | `JWT_REFRESH_SECRET` | Ya | Rahasia untuk token pembaruan aplikasi. |
+| `SYSTEM_RESTORE_DB_ADMIN_PASSWORD` | Ya | Kata sandi akun administrator khusus untuk pemulihan basis data. |
 
-Di Bash, buat satu nilai aman dengan perintah berikut. Jalankan empat kali untuk memperoleh empat nilai berbeda.
+Di Bash, buat satu nilai aman dengan perintah berikut. Jalankan lima kali untuk memperoleh lima nilai berbeda.
 
 ```sh
 openssl rand -hex 32
 ```
 
-Di PowerShell, gunakan perintah berikut empat kali bila `openssl` tidak tersedia.
+Di PowerShell, gunakan perintah berikut lima kali bila `openssl` tidak tersedia.
 
 ```powershell
 $bytes = [byte[]]::new(32)
@@ -103,9 +110,10 @@ APP_DB_USER=gosaad_app
 APP_DB_PASSWORD=<nilai-acak-kedua>
 JWT_SECRET=<nilai-acak-ketiga>
 JWT_REFRESH_SECRET=<nilai-acak-keempat>
+SYSTEM_RESTORE_DB_ADMIN_PASSWORD=<nilai-acak-kelima>
 ```
 
-Saat setup interaktif dijalankan lagi, skrip menampilkan versi yang dikonfigurasi dan versi container yang terpasang bila tersedia. Pilih versi baru saat diminta untuk memperbarui hanya `APP_VERSION`; kata sandi dan rahasia yang sudah ada tetap dipertahankan. Biarkan konfigurasi `SYSTEM_RESTORE_*` seperti semula kecuali fitur pemulihan basis data memang akan digunakan. File `.env` sudah diabaikan oleh Git; jangan membagikannya atau memasukkannya ke repository.
+Saat setup interaktif dijalankan lagi, skrip menampilkan versi yang dikonfigurasi dan versi container yang terpasang bila tersedia. Pilih versi baru saat diminta untuk memperbarui hanya `APP_VERSION`; kata sandi dan rahasia yang sudah ada tetap dipertahankan. Biarkan konfigurasi `SYSTEM_RESTORE_*` dari contoh tetap seperti semula setelah mengisi kata sandinya, kecuali fitur pemulihan basis data memang akan digunakan. File `.env` sudah diabaikan oleh Git; jangan membagikannya atau memasukkannya ke repository.
 
 ### 3. Jalankan layanan
 
@@ -145,7 +153,7 @@ docker compose up -d
 docker compose ps
 ```
 
-`docker compose pull` mengunduh image yang tepat sesuai `APP_VERSION`, sedangkan `docker compose up -d` menerapkan perubahan tanpa perlu menjalankan container di terminal. Saat PostgreSQL dimulai, image memastikan `pg_stat_statements` tersedia pada volume yang sudah ada dan database hanya dinyatakan sehat setelah ekstensi dapat dibaca. Sebelum menjalankan container, setup memverifikasi bahwa kedua image tersedia untuk arsitektur Docker saat ini.
+`docker compose pull` mengunduh image GoSAAD sesuai `APP_VERSION` serta image database `postgres:18.4`, sedangkan `docker compose up -d` menerapkan perubahan tanpa perlu menjalankan container di terminal. Saat GoSAAD dimulai, aplikasi merekonsiliasi katalog PostgreSQL, termasuk ekstensi `pg_stat_statements`, pada volume yang sudah ada. Sebelum menjalankan container, setup memverifikasi bahwa kedua image tersedia untuk arsitektur Docker saat ini.
 
 ## Data dan penghapusan
 

@@ -6,7 +6,7 @@ IFS=$'\n\t'
 readonly REPOSITORY_URL="https://github.com/gosaad/gosaad-releases.git"
 readonly RAW_BASE_URL="https://raw.githubusercontent.com/gosaad/gosaad-releases/main"
 readonly APP_IMAGE_REPOSITORY="ghcr.io/gosaad/gosaad"
-readonly POSTGRES_IMAGE_REPOSITORY="ghcr.io/gosaad/gosaad-postgres"
+readonly POSTGRES_IMAGE_REFERENCE="postgres:18.4"
 
 SCRIPT_DIR=""
 DEPLOY_DIR=""
@@ -632,7 +632,7 @@ verify_release_images() {
 
   architecture="$(resolve_docker_architecture)"
   verify_image_platform "$APP_IMAGE_REPOSITORY:$app_version" "$architecture"
-  verify_image_platform "$POSTGRES_IMAGE_REPOSITORY:$app_version" "$architecture"
+  verify_image_platform "$POSTGRES_IMAGE_REFERENCE" "$architecture"
 }
 
 select_app_version() {
@@ -694,13 +694,15 @@ write_generated_env() {
   local app_db_password="$2"
   local jwt_secret="$3"
   local jwt_refresh_secret="$4"
-  local app_version="$5"
+  local restore_db_admin_password="$5"
+  local app_version="$6"
   local line=""
   local app_version_found=0
   local postgres_found=0
   local app_db_found=0
   local jwt_found=0
   local jwt_refresh_found=0
+  local restore_db_admin_found=0
 
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
@@ -724,6 +726,10 @@ write_generated_env() {
         printf 'JWT_REFRESH_SECRET=%s\n' "$jwt_refresh_secret" >> "$TEMP_ENV_FILE"
         jwt_refresh_found=1
         ;;
+      SYSTEM_RESTORE_DB_ADMIN_PASSWORD=*)
+        printf 'SYSTEM_RESTORE_DB_ADMIN_PASSWORD=%s\n' "$restore_db_admin_password" >> "$TEMP_ENV_FILE"
+        restore_db_admin_found=1
+        ;;
       *)
         printf '%s\n' "$line" >> "$TEMP_ENV_FILE"
         ;;
@@ -735,6 +741,7 @@ write_generated_env() {
   [[ "$app_db_found" -eq 1 ]] || die ".env.example is missing APP_DB_PASSWORD."
   [[ "$jwt_found" -eq 1 ]] || die ".env.example is missing JWT_SECRET."
   [[ "$jwt_refresh_found" -eq 1 ]] || die ".env.example is missing JWT_REFRESH_SECRET."
+  [[ "$restore_db_admin_found" -eq 1 ]] || die ".env.example is missing SYSTEM_RESTORE_DB_ADMIN_PASSWORD."
 }
 
 backup_timestamp() {
@@ -753,6 +760,7 @@ generate_env() {
   local app_db_password=""
   local jwt_secret=""
   local jwt_refresh_secret=""
+  local restore_db_admin_password=""
   local backup_file=""
   local timestamp=""
 
@@ -762,16 +770,17 @@ generate_env() {
   fi
 
   write_command openssl rand -hex 32
-  write_info "Running this command four times; generated secret values stay hidden."
+  write_info "Running this command five times; generated secret values stay hidden."
   validate_app_version "$app_version"
   postgres_password="$(generate_secret)"
   app_db_password="$(generate_secret)"
   jwt_secret="$(generate_secret)"
   jwt_refresh_secret="$(generate_secret)"
+  restore_db_admin_password="$(generate_secret)"
 
   umask 077
   TEMP_ENV_FILE="$(mktemp "$DEPLOY_DIR/.env.generated.XXXXXX")"
-  write_generated_env "$postgres_password" "$app_db_password" "$jwt_secret" "$jwt_refresh_secret" "$app_version"
+  write_generated_env "$postgres_password" "$app_db_password" "$jwt_secret" "$jwt_refresh_secret" "$restore_db_admin_password" "$app_version"
 
   if [[ -f "$ENV_FILE" ]]; then
     timestamp="$(backup_timestamp)"
