@@ -6,6 +6,23 @@
 > Each published GoSAAD release synchronizes them to `gosaad-releases`; edit
 > the canonical files here instead of editing their generated copies.
 
+## Nightly Docker
+
+The local release pipeline publishes nightly images separately from stable releases. After the first nightly Docker publication, download `docker-compose.nightly.yml` and `.env.nightly.example` from this repository. The Compose file is standalone and pins the application image to `ghcr.io/gosaad/gosaad:nightly`; PostgreSQL uses the same official image as stable.
+
+Copy `.env.nightly.example` to `.env`, fill every required secret, then run:
+
+```bash
+docker compose -f docker-compose.nightly.yml pull
+docker compose -f docker-compose.nightly.yml up -d
+```
+
+Repeat these commands to refresh an existing nightly deployment. The public one-line installers continue selecting stable releases. To run stable and nightly simultaneously, use separate deployment directories, distinct Compose project names with `-p`, and different host ports.
+
+Nightly Compose and its environment example are generated from the canonical assets in the source repository. Edit the canonical assets instead of generated copies.
+
+## Stable Docker
+
 Repository ini menjalankan **GoSAAD** dan **PostgreSQL** secara lokal memakai Docker Compose. Setelah layanan siap, buka [http://localhost:8080](http://localhost:8080).
 
 > [!IMPORTANT]
