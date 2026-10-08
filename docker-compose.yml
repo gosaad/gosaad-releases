@@ -3,6 +3,7 @@ name: gosaad
 services:
   gosaad-core:
     image: ghcr.io/gosaad/gosaad:${APP_VERSION:?Set APP_VERSION in .env}
+    pull_policy: always
     env_file:
       - ./.env
     depends_on:
@@ -26,6 +27,7 @@ services:
       DB_PROVISION_ADOPT_TARGET_OWNER: "true"
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env}
+      JWT_SESSION_MAX_AGE: ${JWT_SESSION_MAX_AGE:-12h}
       RUNTIME_DIR: /app/runtime
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent --show-error --output /dev/null http://127.0.0.1:8080/api/v1/ping"]
